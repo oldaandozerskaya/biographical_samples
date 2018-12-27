@@ -1,0 +1,178 @@
+import pymorphy2
+import re
+import pandas as pd
+import keras
+from keras.preprocessing import sequence
+from keras.preprocessing.text import Tokenizer
+from gensim.models.keyedvectors import KeyedVectors
+from tqdm import tqdm
+
+
+
+#загрузка готовых эмбеддингов
+def load_emb(path):
+    w2v = KeyedVectors.load_word2vec_format(path, binary=False)
+    return w2v
+
+#очистка примеров
+def clean_text(text):
+    text = text.replace("\\", " ").replace(u"╚", " ").replace(u"╩", " ")
+    text = text.lower()
+    text = re.sub('\-\s\r\n\s{1,}|\-\s\r\n|\r\n', '', text)
+    text = re.sub('[.,:;_%©?*,!@#$%^&()\d]|[+=]|[[]|[]]|[/]|"|\s{2,}|-', ' ', text) 
+    text = " ".join(ma.parse(word)[0].normal_form for word in text.split())
+    text = ' '.join(word for word in text.split() if len(word)>3)
+    all_words = text.split(' ')
+    all_correct_words = ""
+    for word in all_words:
+        if new_word !="":
+            if all_correct_words=="":
+                all_correct_words += new_word
+            else:
+                all_correct_words += " "+new_word
+    return all_correct_words
+
+ma = pymorphy2.MorphAnalyzer()
+#ЗДЕСЬ ПОЛУЧАЕМ ДАТАФРЕЙМ ДЛЯ НАШИХ ТЕКСТОВ
+#обучение
+name = r'обучение.csv'
+with open(name) as f:
+        df = pd.read_csv(f, sep=';', header=None, decimal = ',')
+#df = df.sample(frac=1).reset_index(drop=True)#shuffle data
+print(df)
+#тест
+name = r'экзамен.csv'
+with open(name) as f:
+        df1 = pd.read_csv(f, sep=';', header=None, decimal = ',')
+print(df1)
+
+#ПРЕДОБРАБОТКА
+#для мульклассовой классификации
+descriptions = df[0].tolist()
+categories = df[1].tolist()
+descriptions1 = df1[0].tolist()
+categories1 = df1[1].tolist()
+
+types_of_facts  = {"birth": 0, "death": 1, "occupation": 2, "education": 3, "affiliation": 4, "family": 5, \
+         "parenting": 6, "professional_events": 7, "personal_events": 8, "residence": 9, "none": 10}
+
+for i in range(len(descriptions)):
+    descriptions[i] = clean_text(descriptions[i] )
+    if i%100 == 0:
+        print("checking {0}/{1}".format(i, len(descriptions)))
+for i in range(len(categories)):
+    categories[i] = types_of_facts[categories[i]]
+for i in range(len(descriptions1)):
+    descriptions1[i] = clean_text(descriptions1[i] )
+    if i%100 == 0:
+        print("checking {0}/{1}".format(i, len(descriptions1)))
+for i in range(len(categories1)):
+    categories1[i] = types_of_facts[categories1[i]]
+
+'''
+#для бинарной классификации
+descriptions = df[0].tolist()
+categories = df[1].tolist()
+for i in range(len(descriptions)):
+        descriptions[i] = clean_text(descriptions[i] )
+        if categories[i]=="none":
+            categories[i]=1#не биография
+        else:
+            categories[i]=0#биография  
+descriptions1 = df1[0].tolist()        
+categories1 = df1[1].tolist()
+for i in range(len(descriptions1)):
+        descriptions1[i] = clean_text(descriptions1[i] )
+        if categories1[i]=="none":
+            categories1[i]=1#не биография
+        else:
+            categories1[i]=0#биография
+'''
+
+num_classes = 2#количество классов
+
+descriptions2 = descriptions + descriptions1
+    
+x_train = descriptions
+y_train = categories
+    
+x_test = descriptions1
+y_test = categories1
+
+
+y_train = keras.utils.to_categorical(y_train, num_classes)
+y_test = keras.utils.to_categorical(y_test, num_classes)
+
+# Максимальное количество слов в самом длинном тексте
+max_words = 0
+for desc in descriptions2:
+    words = len(desc.split())
+    if words > max_words:
+        max_words = words
+print('Максимальное количество слов в самом длинном тексте: {} слов'.format(max_words))
+
+maxSequenceLength = max_words
+
+# define class labels
+# prepare tokenizer
+t = Tokenizer()
+t.fit_on_texts(descriptions2)
+vocab_size = len(t.word_index) + 1
+# integer encode the documents
+encoded_docs_train = t.texts_to_sequences(x_train)
+encoded_docs_test = t.texts_to_sequences(x_test)
+# pad documents
+padded_docs_train = sequence.pad_sequences(encoded_docs_train, maxlen=maxSequenceLength)
+padded_docs_test = sequence.pad_sequences(encoded_docs_test, maxlen=maxSequenceLength)
+total_unique_words = len(t.word_counts)
+print('Всего уникальных слов в словаре: {}'.format(total_unique_words))
+
+
+#МАТРИЦА ВЕСОВ
+import numpy as np
+print("Создаю матрицу")
+embedding_matrix = np.zeros((vocab_size, 300))
+w2v = load_emb('1.vec')
+print("Начинаем")
+for word, i in t.word_index.items():    
+    if i%100 == 0:
+        print("checking {0}/{1}".format(i, len(t.word_index.items())))    
+    try:
+        embedding_vector = w2v[new_word]
+        if embedding_vector is not None:
+            embedding_matrix[i] = embedding_vector
+    except:
+        print(word)
+        print(i)
+
+#ПОСТРОЕНИЕ МОДЕЛИ
+from keras.models import Sequential
+from keras.layers import Dense, Embedding, LSTM, Flatten, GRU, SimpleRNN
+from keras.optimizers import RMSprop
+from keras.layers import Bidirectional
+
+print(maxSequenceLength)
+model = Sequential()
+model.add(Embedding(vocab_size, 300, weights=[embedding_matrix], input_length=maxSequenceLength, trainable=False))
+#model.add(e)
+#e = Embedding(vocab_size, 300, weights=[embedding_matrix], input_length=maxSequenceLength, trainable=False)
+#model.add(e)
+#model.add(Flatten())
+#model.add(Dense(200, activation='sigmoid'))
+#model.add(Dropout=0.5)
+#model.add(Embedding(300, maxSequenceLength))
+#model.add(Bidirectional(LSTM(128, dropout=0.5, recurrent_dropout=0.2)))
+model.add(LSTM(128, dropout=0.5, recurrent_dropout=0.2))
+model.add(Dense(num_classes, activation='softmax'))
+# compile the model
+rmsprop = RMSprop(lr=0.001, rho=0.9, epsilon=1e-6)
+#model.compile(optimizer = rmsprop, loss = 'mean_squared_error', metrics=['mean_squared_error', 'mae'])
+#model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+# summarize the model
+print(model.summary())
+
+# evaluate the model
+score = model.evaluate(padded_docs_test, y_test, verbose=0)
+print('Accuracy: %f' % (score[1]*100))
+print('Loss: %f' % (score[0]))
